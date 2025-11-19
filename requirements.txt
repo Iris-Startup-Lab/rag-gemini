@@ -1,0 +1,11 @@
+fastapi==0.104.1
+uvicorn==0.24.0
+
+# SDKs Gemini
+google-generativeai==0.7.2      # Opcional / legacy
+google-genai                    # SDK nuevo con soporte File Search
+
+pydantic==2.5.2
+python-dotenv==1.0.0
+loguru==0.7.2
+pytest==7.4.3

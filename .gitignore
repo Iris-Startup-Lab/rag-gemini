@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Environment Variables
+.env
+
+# Logs
+*.log
+*.log.*
+
+# IDE Specific
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS Specific
+.DS_Store
+Thumbs.db
+
+# Test Reports
+.coverage
+*.cover
+htmlcov/
+
+# Build
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Documentation
+/docs/_build/
+
+# Miscellaneous
+*.bak
+*.swp
+*.tmp
