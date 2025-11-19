@@ -1,0 +1,7 @@
+[DOCUMENTOS RELEVANTES]
+{{context}}
+
+Instrucciones de citación:
+- Cada fragmento anterior está numerado implícitamente por su posición [1], [2], [3], ...
+- Cuando uses un dato específico, añade la cita [n] en la frase.
+- Al final, repite TODAS las citas usadas en una sección "## Fuentes" con el formato indicado.

@@ -1,0 +1,15 @@
+profiles:
+  base:
+    system_instruction_file: "prompts/base_prompt.txt"
+
+  leyes:
+    system_instruction_file: "prompts/leyes_prompt.txt"
+    context_template_file: "prompts/context_template.txt"
+
+  tramites:
+    system_instruction_file: "prompts/tramites_prompt.txt"
+    context_template_file: "prompts/context_template.txt"
+
+  default:
+    system_instruction_file: "prompts/base_prompt.txt"
+    context_template_file: "prompts/context_template.txt"
