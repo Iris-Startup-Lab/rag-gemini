@@ -1,158 +1,181 @@
-Buenísima pregunta, aquí está justo el “cómo se llena de PDFs” este backend 💾📚
+## 📂 Carga e indexación de documentos en Gemini File Search
 
-Te respondo en tres partes:
-
-1. **Concepto general (leyes / trámites / general)**
-2. **Flujo concreto paso a paso**
-3. **Script para cargar carpetas locales (leyes y trámites)**
+Esta sección explica **cómo se llenan de PDFs** los stores de Gemini que usa el backend, y cómo se conectan con el resto del pipeline RAG.
 
 ---
 
-## 1️⃣ Concepto: cómo mapeamos leyes / trámites / general
+### 1. Concepto: stores por categoría (`leyes`, `tramites`, `general`)
 
-Con el código que ya tenemos, **cada “categoría” es un File Search Store de Gemini**:
+El backend usa **Gemini File Search** como capa de almacenamiento/indexación.
+Cada categoría de documentos se mapea a un **File Search Store** distinto:
 
-* Un store para **leyes**
-* Un store para **trámites**
-* (Opcional pero súper útil) un store **general** que tenga *ambas cosas* para búsquedas globales.
+* `GEMINI_STORE_LEYES` → PDFs normativos (leyes, reglamentos, disposiciones, etc.).
+* `GEMINI_STORE_TRAMITES` → PDFs de trámites (fichas, guías, requisitos).
+* `GEMINI_STORE_GENERAL` → combinación de **leyes + trámites** para búsquedas globales.
 
-Entonces:
+En el frontend:
 
-* Si en el frontend seleccionan **“Solo leyes”** → llamas al backend con el `store_name` de leyes.
-* Si seleccionan **“Solo trámites”** → usas el `store_name` de trámites.
-* Si seleccionan **“General”** → usas el `store_name` del store general (donde subimos leyes + trámites).
+* Si el usuario selecciona **“Solo leyes”**, se consulta `GEMINI_STORE_LEYES`.
+* Si selecciona **“Solo trámites”**, se consulta `GEMINI_STORE_TRAMITES`.
+* Si selecciona **“General”**, se consulta `GEMINI_STORE_GENERAL`.
 
-👀 Sí, esto implica duplicar los documentos en el `store_general`, pero con ~170 archivos es totalmente manejable para un MVP y mantiene el backend simple.
+> Nota: `GEMINI_STORE_GENERAL` contiene una copia de ambos conjuntos de documentos. Es redundante, pero simplifica mucho el MVP.
 
 ---
 
-## 2️⃣ Paso a paso: antes / después de `uvicorn main:app --reload`
+### 2. Cambios realizados e integración al pipeline
 
-En realidad, **necesitas tener el servidor levantado** para poder usar los endpoints de carga, así que el orden sano es:
+A nivel de arquitectura del backend se añadieron varios módulos:
 
-### Paso 0 — Estructura de carpetas local
+1. **Servicio Gemini (`src/services/gemini_service.py`)**
 
-En tu repo, crea algo así:
+   * Envuelve al SDK `google-genai`.
+   * Funciones clave:
+
+     * `create_store(display_name)` → crea un File Search Store.
+     * `upload_files_to_store(store_name, file_paths, wait_for_index=True)` → sube archivos locales al store y espera a que se indexen.
+     * `query_with_rag(store_name, query, system_instruction, generation_config)` → ejecuta la consulta RAG contra un store.
+
+2. **Servicio de archivos (`src/services/file_service.py`)**
+
+   * Orquesta la subida:
+
+     * Valida archivos mediante `src.preprocessing.cleaner` (tamaño y extensión).
+     * Los guarda temporalmente en disco.
+     * Llama a `GeminiService.upload_files_to_store`.
+   * Devuelve un `UploadResponse` con:
+
+     * `accepted_files`: lista de archivos aceptados.
+     * `discarded_files`: archivos descartados (por tamaño/extensión).
+
+3. **Módulo de limpieza (`src/preprocessing/cleaner.py`)**
+
+   * Aplica filtro previo para la versión gratuita de Gemini:
+
+     * Tamaño máximo (MB) controlado por `MAX_FREE_TIER_FILE_SIZE_MB` en `.env`.
+     * Extensiones soportadas: `.pdf`, `.txt`, `.md`, `.docx`.
+   * Evita subir archivos demasiado grandes o con extensiones no soportadas.
+
+4. **Gestor de prompts (`src/prompting/prompt_manager.py` + `src/services/prompt_service.py`)**
+
+   * Carga archivos YAML desde la carpeta `prompts/`.
+   * Perfil por defecto: `prompts/default.yaml`.
+   * `PromptService` expone `get_system_instruction(profile)` para obtener el texto de sistema que se envía al modelo.
+
+5. **Nuevos endpoints FastAPI (`src/api/routes.py`)**
+
+   * `GET /health` → comprobar estado del backend.
+   * `POST /create-store` → crear un File Search Store (Gemini).
+   * `POST /upload-files/{store_name:path}` → subir y validar archivos a un store.
+   * `POST /query/{store_name:path}` → consultar un store con el perfil de prompt elegido.
+
+6. **Script de carga en lotes (`scripts/batch_upload.py`)**
+
+   * Permite subir carpetas completas desde el disco local hacia un store de Gemini.
+   * Soporta `--batch-size` para dividir grandes volúmenes (ej. 150 PDFs de leyes) en varios lotes y evitar timeouts.
+
+En conjunto, el pipeline de indexación queda así:
+
+> Carpeta local (`data/leyes`, `data/tramites`)
+> ➜ `scripts/batch_upload.py`
+> ➜ Endpoint `POST /upload-files/{store_name}`
+> ➜ `FileService` + `cleaner`
+> ➜ `GeminiService.upload_files_to_store`
+> ➜ **Gemini File Search Store** (`leyes`, `tramites`, `general`)
+
+Y el pipeline de consulta:
+
+> Frontend / Swagger (`/query/{store_name}`)
+> ➜ `PromptService` (carga `default.yaml`)
+> ➜ `GeminiService.query_with_rag`
+> ➜ Gemini File Search + modelo
+> ➜ Respuesta `QueryResponse { answer, sources[] }`
+
+---
+
+### 3. Preparación del entorno y creación de stores
+
+#### 3.1. Estructura de carpetas local
+
+En el repositorio, organizar así:
 
 ```bash
 data/
   leyes/
-    (aquí pones tus ~150 PDFs de leyes)
+    # ~150 PDFs de leyes
   tramites/
-    (aquí pones tus ~20 PDFs de trámites)
+    # ~20 PDFs de trámites
 ```
 
-No hace falta que el backend “vea” estas carpetas directamente: las vamos a usar desde un script que llama al endpoint de carga.
-
----
-
-### Paso 1 — Levantar el backend
+#### 3.2. Levantar el backend
 
 ```bash
 uvicorn main:app --reload
 ```
 
-Backend escuchando en `http://localhost:8000`.
+Esto expone la API en:
+`http://127.0.0.1:8000`
 
----
+#### 3.3. Crear los 3 File Search Stores en Gemini
 
-### Paso 2 — Crear los 3 stores en Gemini vía API
+Desde `http://127.0.0.1:8000/docs`:
 
-Ve a `http://localhost:8000/docs` (Swagger) y:
+1. Abrir `POST /create-store`.
+2. Ejecutar tres veces con estos cuerpos:
 
-1. Abre `POST /create-store`.
+```json
+{ "display_name": "leyes" }
+```
 
-2. En “Request body”, pon algo como:
+```json
+{ "display_name": "tramites" }
+```
 
-   * Para **leyes**:
+```json
+{ "display_name": "general" }
+```
 
-     ```json
-     {
-       "display_name": "leyes"
-     }
-     ```
-   * Para **trámites**:
+3. Guardar los `store_name` devueltos, que tienen forma:
 
-     ```json
-     {
-       "display_name": "tramites"
-     }
-     ```
-   * Para **general**:
+```text
+fileSearchStores/leyes-xxxxxxxxxxxx
+fileSearchStores/tramites-xxxxxxxxx
+fileSearchStores/general-xxxxxxxxxx
+```
 
-     ```json
-     {
-       "display_name": "general"
-     }
-     ```
-
-3. Ejecuta cada uno y **guarda los `store_name`** que te regrese la API (son IDs largos tipo `projects/xxx/locations/xxx/fileStores/yyy`).
-
-Te sugiero apuntarlos en tu `.env` para tenerlos a la mano:
+4. Añadirlos al `.env`:
 
 ```env
-GEMINI_STORE_LEYES=projects/.../stores/...
-GEMINI_STORE_TRAMITES=projects/.../stores/...
-GEMINI_STORE_GENERAL=projects/.../stores/...
+GEMINI_STORE_LEYES=fileSearchStores/leyes-xxxxxxxxxxxx
+GEMINI_STORE_TRAMITES=fileSearchStores/tramites-xxxxxxxxx
+GEMINI_STORE_GENERAL=fileSearchStores/general-xxxxxxxxxx
 ```
 
 ---
 
-### Paso 3 — Cargar tus PDFs desde carpetas locales
+### 4. Script de carga en lotes (`scripts/batch_upload.py`)
 
-Aquí es donde entra la parte de “¿se puede tener una ruta específica para que los tome?”.
-
-Vamos a añadir un **script pequeño** que:
-
-* Lee una carpeta local (`data/leyes` o `data/tramites`).
-* Envía TODOS los archivos al endpoint `POST /upload-files/{store_name}`.
-
-De esta forma tú solo dejas los PDFs en la carpeta y ejecutas un comando.
-
----
-
-## 3️⃣ Script: `scripts/batch_upload.py`
-
-Crea la carpeta `scripts/` y dentro el archivo `batch_upload.py`:
+El script final soporta **batches** para evitar timeouts con muchos archivos:
 
 ```python
 # scripts/batch_upload.py
 import argparse
-import os
-from pathlib import Path
 import mimetypes
+from pathlib import Path
+from typing import List
 
 import requests
 
+API_BASE = "http://127.0.0.1:8000"
 
-API_BASE = "http://localhost:8000"
+
+def list_files(folder: Path) -> List[Path]:
+    return [p for p in sorted(folder.iterdir()) if p.is_file()]
 
 
-def collect_files(folder: Path):
-    """
-    Recorre la carpeta y prepara la lista de (campo, (filename, fileobj, mimetype))
-    para el multipart/form-data que espera FastAPI.
-    """
-    files_payload = []
-
-    for entry in sorted(folder.iterdir()):
-        if not entry.is_file():
-            continue
-
-        mime, _ = mimetypes.guess_type(entry.name)
-        if mime is None:
-            # Por defecto asumimos PDF si no se puede adivinar
-            mime = "application/pdf"
-
-        fileobj = open(entry, "rb")
-        files_payload.append(
-            (
-                "files",  # debe coincidir con el parámetro 'files' del endpoint
-                (entry.name, fileobj, mime),
-            )
-        )
-
-    return files_payload
+def chunked(items: List[Path], size: int):
+    for i in range(0, len(items), size):
+        yield items[i : i + size]
 
 
 def main():
@@ -162,12 +185,18 @@ def main():
     parser.add_argument(
         "--store-name",
         required=True,
-        help="Nombre completo del File Search store (store_name devuelto por /create-store).",
+        help="store_name devuelto por /create-store.",
     )
     parser.add_argument(
         "--folder",
         required=True,
         help="Ruta a la carpeta local con los archivos (ej. data/leyes).",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=30,
+        help="Número de archivos por lote (default: 30).",
     )
 
     args = parser.parse_args()
@@ -176,94 +205,160 @@ def main():
     if not folder.exists() or not folder.is_dir():
         raise SystemExit(f"La carpeta '{folder}' no existe o no es un directorio.")
 
-    files_payload = collect_files(folder)
-    if not files_payload:
+    all_files = list_files(folder)
+    if not all_files:
         raise SystemExit(f"No se encontraron archivos en la carpeta '{folder}'.")
 
-    print(f"[+] Subiendo {len(files_payload)} archivos de '{folder}' al store:")
-    print(f"    {args.store-name}")
-
-    resp = requests.post(
-        f"{API_BASE}/upload-files/{args.store-name}",
-        files=files_payload,
-        timeout=600,  # hasta 10 minutos, por si son archivos pesados
+    print(
+        f"[+] Encontrados {len(all_files)} archivos en '{folder}'. "
+        f"Subiendo en lotes de {args.batch_size}..."
     )
 
-    # IMPORTANTE: cerrar archivos locales
-    for _, file_tuple in files_payload:
-        file_tuple[1].close()
+    batch_num = 0
+    for batch in chunked(all_files, args.batch_size):
+        batch_num += 1
 
-    print(f"[+] Status: {resp.status_code}")
-    try:
-        print(resp.json())
-    except Exception:
-        print(resp.text)
+        files_payload = []
+        for entry in batch:
+            mime, _ = mimetypes.guess_type(entry.name)
+            if mime is None:
+                mime = "application/pdf"
+
+            fileobj = open(entry, "rb")
+            files_payload.append(
+                (
+                    "files",
+                    (entry.name, fileobj, mime),
+                )
+            )
+
+        print(
+            f"[+] Lote {batch_num}: subiendo {len(batch)} archivos al store "
+            f"{args.store_name}..."
+        )
+
+        try:
+            resp = requests.post(
+                f"{API_BASE}/upload-files/{args.store_name}",
+                files=files_payload,
+                timeout=1800,  # 30 minutos por lote
+            )
+        finally:
+            for _, file_tuple in files_payload:
+                file_tuple[1].close()
+
+        print(f"    Status: {resp.status_code}")
+        try:
+            print(f"    Respuesta: {resp.json()}")
+        except Exception:
+            print(f"    Texto: {resp.text}")
 
 
 if __name__ == "__main__":
     main()
 ```
 
-> Ojo: en el script, donde puse `args.store-name` debe ser `args.store_name` (en Python no se aceptan guiones en nombres de variables). Corrijo en el ejemplo de uso abajo.
-
 ---
 
-### Cómo usarlo para tus 3 categorías
+### 5. Los 4 comandos clave de carga
 
-Con el backend corriendo:
+Con el backend corriendo (`uvicorn main:app --reload`) y las carpetas `data/leyes` y `data/tramites` listas, estos son los 4 comandos para llenar los stores:
 
 ```bash
-# 1) LEYES (~150 archivos)
-python scripts/batch_upload.py \
-  --store-name "EL_STORE_NAME_DE_LEYES" \
-  --folder "data/leyes"
-
-# 2) TRÁMITES (~20 archivos)
-python scripts/batch_upload.py \
-  --store-name "EL_STORE_NAME_DE_TRAMITES" \
-  --folder "data/tramites"
-
-# 3) GENERAL (leyes + trámites)
-python scripts/batch_upload.py \
-  --store-name "EL_STORE_NAME_DE_GENERAL" \
-  --folder "data/leyes"
-
-python scripts/batch_upload.py \
-  --store-name "EL_STORE_NAME_DE_GENERAL" \
-  --folder "data/tramites"
+# 1) LEYES → store de leyes (~150 archivos, en lotes de 30)
+python scripts/batch_upload.py --store-name "fileSearchStores/leyes-XXXXXXXXXXXX" --folder "data/leyes" --batch-size 30
 ```
 
-Y listo:
+```bash
+# 2) TRÁMITES → store de trámites (~20 archivos)
+python scripts/batch_upload.py --store-name "fileSearchStores/tramites-XXXXXXXX" --folder "data/tramites"
+```
 
-* Tienes **un store solo de leyes**,
-* **otro solo de trámites**,
-* y **uno general con todo mezclado**.
+```bash
+# 3) LEYES → store general (para búsquedas globales)
+python scripts/batch_upload.py --store-name "fileSearchStores/general-XXXXXXXXXX" --folder "data/leyes" --batch-size 30
+```
+
+```bash
+# 4) TRÁMITES → store general
+python scripts/batch_upload.py --store-name "fileSearchStores/general-XXXXXXXXXX" --folder "data/tramites"
+```
+
+> Sustituye los `XXXXXXXX` por los IDs reales que te devolvió `/create-store`.
 
 ---
 
-## 4️⃣ Cómo se consulta luego (leyes / trámites / general)
+### 6. Cómo hacer consultas al RAG
 
-Una vez cargado todo, puedes probar en Swagger o con `curl`:
+Una vez que los stores están llenos, se pueden hacer consultas de dos maneras: vía Swagger o vía `curl`/frontend.
+
+#### 6.1. Consultas desde Swagger
+
+1. Ir a `http://127.0.0.1:8000/docs`.
+
+2. Buscar `POST /query/{store_name}`.
+
+3. Clic en **“Try it out”**.
+
+4. En el campo `store_name` (path), elegir uno:
+
+   * Solo leyes:
+     `fileSearchStores/leyes-XXXXXXXXXXXX`
+   * Solo trámites:
+     `fileSearchStores/tramites-XXXXXXXX`
+   * General:
+     `fileSearchStores/general-XXXXXXXXXX`
+
+5. En el cuerpo (`Request body`), usar:
+
+```json
+{
+  "query": "¿Cuál es el límite máximo de comisiones que pueden cobrar las AFORE?",
+  "prompt_profile": "default"
+}
+```
+
+6. Clic en **Execute**.
+   La respuesta tendrá forma:
+
+```json
+{
+  "answer": "Texto generado por el modelo...",
+  "sources": [
+    {
+      "filename": "Aviso por el cual la CONSAR da a conocer el máximo al que estarán sujetas las comisiones....pdf",
+      "page": 2,
+      "snippet": "Fragmento relevante..."
+    }
+  ]
+}
+```
+
+#### 6.2. Consultas vía `curl` (útil para frontend / pruebas CLI)
 
 ```bash
 # Solo LEYES
-curl -X POST "http://localhost:8000/query/EL_STORE_NAME_DE_LEYES" \
+curl -X POST "http://127.0.0.1:8000/query/fileSearchStores/leyes-XXXXXXXXXXXX" \
   -H "Content-Type: application/json" \
   -d '{
         "query": "¿Cuál es el límite máximo de comisiones que pueden cobrar las AFORE?",
         "prompt_profile": "default"
       }'
+```
 
+```bash
 # Solo TRÁMITES
-curl -X POST "http://localhost:8000/query/EL_STORE_NAME_DE_TRAMITES" \
+curl -X POST "http://127.0.0.1:8000/query/fileSearchStores/tramites-XXXXXXXX" \
   -H "Content-Type: application/json" \
   -d '{
-        "query": "¿Qué documentos necesito para un retiro parcial por desempleo?",
+        "query": "¿Qué trámites básicos existen en el SAR?",
         "prompt_profile": "default"
       }'
+```
 
-# GENERAL
-curl -X POST "http://localhost:8000/query/EL_STORE_NAME_DE_GENERAL" \
+```bash
+# GENERAL (leyes + trámites)
+curl -X POST "http://127.0.0.1:8000/query/fileSearchStores/general-XXXXXXXXXX" \
   -H "Content-Type: application/json" \
   -d '{
         "query": "Explica cómo funciona el SAR y qué trámites básicos existen",
@@ -271,20 +366,23 @@ curl -X POST "http://localhost:8000/query/EL_STORE_NAME_DE_GENERAL" \
       }'
 ```
 
-En el frontend, lo único que tienes que hacer es:
+En el frontend, bastará con mapear:
 
-* Guardar/mapear los 3 `store_name`s.
-* Ofrecer un selector:
+* `topic = "leyes"`    → `GEMINI_STORE_LEYES`
+* `topic = "tramites"` → `GEMINI_STORE_TRAMITES`
+* `topic = "general"`  → `GEMINI_STORE_GENERAL`
 
-  * `topic = "leyes"` → usa `STORE_LEYES`
-  * `topic = "tramites"` → usa `STORE_TRAMITES`
-  * `topic = "general"` → usa `STORE_GENERAL`
+y construir la URL:
 
-y mandar ese `store_name` al endpoint `/query/{store_name}`.
+```text
+POST /query/{store_name}
+```
 
----
+con el JSON:
 
-Si quieres, en el siguiente mensaje puedo:
-
-* Ajustar cualquier detalle del script (por ejemplo dividir en lotes de 30 archivos).
-* O bien hacer una versión donde en lugar de usar los `store_name` directamente, uses `topic=leyes|tramites|general` y el backend se encargue de traducirlo a IDs leyendo el `.env`.
+```json
+{
+  "query": "<pregunta del usuario>",
+  "prompt_profile": "default"
+}
+```

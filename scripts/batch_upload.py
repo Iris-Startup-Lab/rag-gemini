@@ -2,36 +2,26 @@
 import argparse
 import mimetypes
 from pathlib import Path
+from typing import List
 
 import requests
 
 API_BASE = "http://127.0.0.1:8000"
 
 
-def collect_files(folder: Path):
+def list_files(folder: Path) -> List[Path]:
     """
-    Recorre la carpeta y prepara la lista de (campo, (filename, fileobj, mimetype))
-    para el multipart/form-data que espera FastAPI.
+    Regresa la lista de archivos dentro de la carpeta.
     """
-    files_payload = []
+    return [p for p in sorted(folder.iterdir()) if p.is_file()]
 
-    for entry in sorted(folder.iterdir()):
-        if not entry.is_file():
-            continue
 
-        mime, _ = mimetypes.guess_type(entry.name)
-        if mime is None:
-            mime = "application/pdf"
-
-        fileobj = open(entry, "rb")
-        files_payload.append(
-            (
-                "files",  # nombre del parámetro en el endpoint /upload-files
-                (entry.name, fileobj, mime),
-            )
-        )
-
-    return files_payload
+def chunked(items: List[Path], size: int):
+    """
+    Genera sublistas (batches) de tamaño 'size'.
+    """
+    for i in range(0, len(items), size):
+        yield items[i : i + size]
 
 
 def main():
@@ -48,6 +38,12 @@ def main():
         required=True,
         help="Ruta a la carpeta local con los archivos (ej. data/leyes).",
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=30,
+        help="Número de archivos por lote (default: 30).",
+    )
 
     args = parser.parse_args()
 
@@ -55,28 +51,54 @@ def main():
     if not folder.exists() or not folder.is_dir():
         raise SystemExit(f"La carpeta '{folder}' no existe o no es un directorio.")
 
-    files_payload = collect_files(folder)
-    if not files_payload:
+    all_files = list_files(folder)
+    if not all_files:
         raise SystemExit(f"No se encontraron archivos en la carpeta '{folder}'.")
 
-    print(f"[+] Subiendo {len(files_payload)} archivos de '{folder}' al store:")
-    print(f"    {args.store_name}")
-
-    resp = requests.post(
-        f"{API_BASE}/upload-files/{args.store_name}",
-        files=files_payload,
-        timeout=600,
+    print(
+        f"[+] Encontrados {len(all_files)} archivos en '{folder}'. "
+        f"Subiendo en lotes de {args.batch_size}..."
     )
 
-    # Cerrar archivos locales
-    for _, file_tuple in files_payload:
-        file_tuple[1].close()
+    batch_num = 0
+    for batch in chunked(all_files, args.batch_size):
+        batch_num += 1
 
-    print(f"[+] Status: {resp.status_code}")
-    try:
-        print(resp.json())
-    except Exception:
-        print(resp.text)
+        files_payload = []
+        for entry in batch:
+            mime, _ = mimetypes.guess_type(entry.name)
+            if mime is None:
+                mime = "application/pdf"
+
+            fileobj = open(entry, "rb")
+            files_payload.append(
+                (
+                    "files",
+                    (entry.name, fileobj, mime),
+                )
+            )
+
+        print(
+            f"[+] Lote {batch_num}: subiendo {len(batch)} archivos al store "
+            f"{args.store_name}..."
+        )
+
+        try:
+            resp = requests.post(
+                f"{API_BASE}/upload-files/{args.store_name}",
+                files=files_payload,
+                timeout=1800,  # 30 minutos por lote (muy amplio para estar tranquilos)
+            )
+        finally:
+            # Cerrar SIEMPRE los archivos
+            for _, file_tuple in files_payload:
+                file_tuple[1].close()
+
+        print(f"    Status: {resp.status_code}")
+        try:
+            print(f"    Respuesta: {resp.json()}")
+        except Exception:
+            print(f"    Texto: {resp.text}")
 
 
 if __name__ == "__main__":
