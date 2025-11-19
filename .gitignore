@@ -43,3 +43,6 @@ dist/
 *.bak
 *.swp
 *.tmp
+
+# Data
+/data/

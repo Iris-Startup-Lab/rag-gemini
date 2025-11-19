@@ -60,7 +60,7 @@ def create_store(
 
 
 @router.post(
-    "/upload-files/{store_name}",
+    "/upload-files/{store_name:path}",
     response_model=UploadResponse,
 )
 async def upload_files(
@@ -77,7 +77,7 @@ async def upload_files(
     return resp
 
 
-@router.post("/query/{store_name}", response_model=QueryResponse)
+@router.post("/query/{store_name:path}", response_model=QueryResponse)
 async def query_store(
     store_name: str,
     body: QueryRequest,

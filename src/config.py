@@ -1,9 +1,15 @@
-from pydantic import BaseSettings, Field
+from pydantic_settings import BaseSettings
+from pydantic import Field
 
 
 class Settings(BaseSettings):
     # Clave de Gemini
     GEMINI_API_KEY: str = Field(..., description="API key de Gemini")
+
+    # IDs de stores (opcional, útiles para mapear 'leyes', 'tramites', 'general')
+    GEMINI_STORE_LEYES: str | None = None
+    GEMINI_STORE_TRAMITES: str | None = None
+    GEMINI_STORE_GENERAL: str | None = None
 
     # Límite de tamaño de archivos para la capa de filtro (MB)
     MAX_FREE_TIER_FILE_SIZE_MB: int = Field(
