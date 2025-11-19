@@ -2,6 +2,8 @@ from typing import List
 from src.models.schemas import Source
 from src.utils.logger import logger
 
+MAX_SNIPPET_CHARS = 160  # Máximo de caracteres para el snippet
+
 
 def extract_sources_from_grounding(raw_response) -> List[Source]:
     """
@@ -38,16 +40,15 @@ def extract_sources_from_grounding(raw_response) -> List[Source]:
 
             title = getattr(rc, "title", None)
             uri = getattr(rc, "uri", None)
-            text = getattr(rc, "text", None)
 
             filename = title or uri or "desconocido"
-            snippet = text or ""
 
+            # Cambiar snippet a vacío
             sources.append(
                 Source(
                     filename=filename,
                     page=None,      # FileSearch todavía no expone página
-                    snippet=snippet,
+                    snippet="",   # <--- vacío para no saturar el front
                 )
             )
 
@@ -58,7 +59,7 @@ def extract_sources_from_grounding(raw_response) -> List[Source]:
                 unique[s.filename] = s
 
         cleaned = list(unique.values())
-        logger.info(f"📚 Fuentes extraídas: {cleaned}")
+        logger.info(f"📚 Fuentes extraídas (sin snippet): {cleaned}")
 
         return cleaned
 
