@@ -108,3 +108,28 @@ async def query_store(
     sources: List[Source] = extract_sources_from_grounding(raw_response)
 
     return QueryResponse(answer=answer_text, sources=sources)
+
+
+@router.post("/query/")
+async def query_endpoint(req: QueryRequest):
+    gemini_service = GeminiService()
+    prompt_service = PromptService()
+    _, system_instruction = prompt_service.get_system_instruction(
+        profile=req.prompt_profile
+    )
+    try:
+        raw_response = gemini_service.query_with_rag(
+            store_name=req.topic,
+            query=req.query,
+            system_instruction=system_instruction,
+        )
+    except GeminiServiceError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # ---- Texto principal de la respuesta ---- #
+    answer_text = getattr(raw_response, "text", "") or ""
+
+    # ---- Fuentes desde grounding_metadata (File Search) ---- #
+    sources: List[Source] = extract_sources_from_grounding(raw_response)
+
+    return QueryResponse(answer=answer_text, sources=sources)
