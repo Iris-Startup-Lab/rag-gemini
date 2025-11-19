@@ -12,6 +12,7 @@ from src.services.file_service import FileService
 from src.services.prompt_service import PromptService
 from src.utils.exceptions import GeminiServiceError
 from src.utils.logger import logger
+from src.utils.gemini_utils import extract_sources_from_grounding
 
 router = APIRouter()
 
@@ -100,28 +101,10 @@ async def query_store(
     except GeminiServiceError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    # ---- Parseo muy conservador del response ---- #
-    # MVP: usamos response.text como answer y dejamos sources vacío
-    # o intentamos extraer de citations si están presentes.
-    answer_text = getattr(raw_response, "text", "")
+    # ---- Texto principal de la respuesta ---- #
+    answer_text = getattr(raw_response, "text", "") or ""
 
-    sources: List[Source] = []
-
-    # Intento de extracción de citas (puede necesitar ajuste según el SDK real)
-    try:
-        candidates = getattr(raw_response, "candidates", [])
-        for cand in candidates:
-            citations = getattr(cand, "citations", []) or []
-            for c in citations:
-                meta = getattr(c, "metadata", {}) or {}
-                sources.append(
-                    Source(
-                        filename=meta.get("file_name", "desconocido"),
-                        page=meta.get("page", None),
-                        snippet=meta.get("snippet", ""),
-                    )
-                )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(f"No se pudieron parsear citas de Gemini: {exc}")
+    # ---- Fuentes desde grounding_metadata (File Search) ---- #
+    sources: List[Source] = extract_sources_from_grounding(raw_response)
 
     return QueryResponse(answer=answer_text, sources=sources)
