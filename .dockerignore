@@ -1,0 +1,53 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtualenvs
+.venv/
+venv/
+ENV/
+
+# Environment / secrets
+.env
+
+# Logs
+*.log
+*.log.*
+
+# IDE / editor
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test reports
+.coverage
+*.cover
+htmlcov/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Docs y tests (no son necesarios en la imagen de producción)
+docs/
+tests/
+
+# Datos locales (en tu backend usas Gemini como storage, así que no necesitas /data en la imagen)
+data/
+
+# Otros temporales
+*.bak
+*.swp
+*.tmp
