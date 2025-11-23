@@ -36,7 +36,8 @@ rag-gemini/
 │   ├── utils/                  # Utilidades reutilizables
 │   │   ├── __init__.py
 │   │   ├── logger.py           # Configuración de logging (loguru)
-│   │   └── exceptions.py       # Excepciones personalizadas
+│   │   ├── exceptions.py       # Excepciones personalizadas
+│   │   └── gemini_utils.py    # Funciones útiles para interacción con Gemini
 │   │
 │   └── config.py               # Configuraciones globales (API key, límites, entorno)
 │
@@ -103,3 +104,9 @@ UploadResponse → incluye listas de archivos aceptados y descartados.
 QueryRequest → consulta y tipo de prompt/rol.
 
 QueryResponse → respuesta con fuentes obligatorias.
+
+src/utils/gemini_utils.py
+Funciones útiles para la interacción con Gemini, como la construcción de queries o el manejo de respuestas.
+
+scripts/batch_upload.py
+Script para la subida masiva de archivos a los stores de Gemini, aplicando las validaciones y procesos necesarios.

@@ -4,20 +4,27 @@
 
 ### **Archivo requirements.txt:**
 ```plaintext
-fastapi==0.104.1
-uvicorn==0.24.0
-google-generativeai==0.7.2      # SDK oficial de Gemini
-pydantic==2.5.2
-python-dotenv==1.0.0
-loguru==0.7.2                    # Para logging avanzado
-pytest==7.4.3                    # Para tests
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+google-genai
+
+pydantic==2.9.2
+pydantic-settings==2.6.0
+
+python-dotenv==1.0.1
+loguru==0.7.2
+requests==2.32.3
+pytest==8.3.3
+
+python-multipart
 ```
 
 ### **Importaciones Clave:**
 
 #### gemini_service.py:
 ```python
-import google.generativeai as genai
+import google.genai as genai
 from loguru import logger
 ```
 
@@ -47,10 +54,6 @@ class Source(BaseModel):
 class QueryRequest(BaseModel):
     query: str
     prompt_profile: str = "default"
-
-class QueryResponse(BaseModel):
-    answer: str
-    sources: List[Source]
 ```
 
 #### routes.py:
