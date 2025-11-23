@@ -13,3 +13,5 @@ requests==2.32.3
 pytest==8.3.3
 
 python-multipart
+
+playwright
