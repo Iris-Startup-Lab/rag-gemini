@@ -103,7 +103,7 @@ class GeminiService:
         if generation_config is None:
             generation_config = {
                 "temperature": 0.2,
-                "max_output_tokens": 1024,
+                "max_output_tokens": 3000,
             }
 
         try:
