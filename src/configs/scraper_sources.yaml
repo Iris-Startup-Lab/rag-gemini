@@ -1,0 +1,18 @@
+sources:
+  - id: consar_leyes
+    name: "CONSAR - Leyes"
+    category: "leyes"                     # Para mapear a carpeta data/leyes
+    store_env: "GEMINI_STORE_LEYES"       # Variable de entorno con el store_name
+    schedule: "daily"                     # Solo informativo / futuro
+    type: "listing_page"                  # Tipo de fuente (listado de PDFs)
+    base_url: "https://www.gob.mx/consar/documentos/leyes"
+    link_selector: "a[href$='.pdf']"      # CSS selector para encontrar PDFs
+    follow_pagination: false
+
+  - id: consar_tramites
+    name: "CONSAR - Trámites"
+    category: "tramites"
+    store_env: "GEMINI_STORE_TRAMITES"
+    type: "listing_page"
+    base_url: "https://www.gob.mx/consar/documentos/tramites"
+    link_selector: "a[href$='.pdf']"
