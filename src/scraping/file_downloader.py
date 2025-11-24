@@ -1,29 +1,58 @@
-import hashlib
 from pathlib import Path
-from typing import Iterable
-import httpx
+from typing import Iterable, List
+import hashlib
+import logging
 
-def download_new_files(pdf_urls: Iterable[str], category: str) -> list[Path]:
-    data_dir = Path("data") / category
-    data_dir.mkdir(parents=True, exist_ok=True)
+import requests
 
-    new_files: list[Path] = []
+from src.scraping import DATA_ROOT
+
+logger = logging.getLogger(__name__)
+
+def download_new_files(pdf_urls: Iterable[str], category: str) -> List[Path]:
+    """
+    Descarga PDFs que no existan aún en data/<category>/.
+
+    - Nombra los archivos con: <hash10>_<nombre_original.pdf>
+    - Devuelve la lista de rutas de archivos NUEVOS (no incluye los ya existentes).
+    """
+    target_dir = DATA_ROOT / category
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    new_files: List[Path] = []
 
     for url in pdf_urls:
-        # Nombre de archivo basado en hash + nombre original
+        url = url.strip()
+        if not url:
+            continue
+
         url_hash = hashlib.sha1(url.encode("utf-8")).hexdigest()[:10]
         filename = url.split("/")[-1] or "file.pdf"
-        target = data_dir / f"{url_hash}_{filename}"
+        if not filename.lower().endswith(".pdf"):
+            # Si más adelante quieres TXT, DOCX, etc., aquí puedes ampliarlo.
+            logger.debug("Saltando URL no-PDF: %s", url)
+            continue
 
-        if target.exists():
-            continue  # ya descargado
+        path = target_dir / f"{url_hash}_{filename}"
 
-        with httpx.stream("GET", url, follow_redirects=True, timeout=60.0) as r:
-            r.raise_for_status()
-            with open(target, "wb") as f:
-                for chunk in r.iter_bytes():
-                    f.write(chunk)
+        if path.exists():
+            logger.debug("Archivo ya existe, no se descarga: %s", path.name)
+            continue
 
-        new_files.append(target)
+        logger.info("Descargando archivo nuevo: %s -> %s", url, path)
+        try:
+            with requests.get(url, stream=True, timeout=60) as r:
+                r.raise_for_status()
+                with path.open("wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+        except Exception as exc:
+            logger.exception("Error descargando %s: %s", url, exc)
+            if path.exists():
+                path.unlink(missing_ok=True)
+            continue
+
+        new_files.append(path)
 
     return new_files
